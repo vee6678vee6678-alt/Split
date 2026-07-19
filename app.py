@@ -68,10 +68,10 @@ try:
         col_names[2] = 'Time_Col_C'
         df.columns = col_names
         
-        # 🚨 แก้ไขจุดสำคัญ: สั่งสร้างคอลัมน์สำหรับเรียงลำดับเวลา เพื่อให้ข้อมูลเรียง 14:30 -> 15:00 -> 19:30 -> 20:00 -> 21:00 -> 21:30 อย่างถูกต้อง
+        # จัดเรียงลำดับเวลาจริงให้ถูกต้องก่อนการคำนวณช่องว่างของเวลา
         df['time_object'] = df['Time_Col_C'].apply(parse_time_string)
         df = df.sort_values(by='time_object').reset_index(drop=True)
-        df = df.drop(columns=['time_object']) # ลบคอลัมน์ตัวช่วยออกไป
+        df = df.drop(columns=['time_object'])
         
         base_cols = df.iloc[:, :3].copy()
         
@@ -124,12 +124,12 @@ try:
         for i, elem in enumerate(unique_sorted_nums):
             color_map[elem] = colors[i % len(colors)]
             
-        # ฟังก์ชันระบายสีเงื่อนไขใหม่
+        # ฟังก์ชันระบายสีเงื่อนไขรายแถว
         def style_entire_table(row):
             styles = [''] * len(row)
             row_idx = row.name
             
-            # 🚨 จุดแก้ไขสี: เปลี่ยนจากสีแดงชมพูเข้มแป๋น เป็น "สีฟ้าอ่อนสบายตา" (#E0F7FA) ตัวหนังสือสีน้ำเงินเข้มอ่านง่ายมาก
+            # ไฮไลต์คอลัมน์ C ด้วยสีฟ้าอ่อนเมื่อเวลากระโดด
             if row_idx in gap_indices:
                 styles[2] = 'background-color: #E0F7FA; color: #006064; font-weight: bold; text-align: center;'
             else:
@@ -138,6 +138,7 @@ try:
             styles[0] = 'text-align: center; color: #000000;'
             styles[1] = 'text-align: center; color: #000000;'
             
+            # แต้มสีฝั่งคอลัมน์ตัวเลขขวาตามประเภท
             for c_idx in range(3, len(row)):
                 val = row.iloc[c_idx]
                 if val != "" and pd.notna(val) and not isinstance(val, str):
@@ -153,7 +154,8 @@ try:
 
         st.markdown(f"### 📋 แผ่นงาน: **{selected_sheet}** (จัดเรียงเวลาถูกต้อง + คอลัมน์ C สีฟ้าอ่อน = ตรวจพบเวลากระโดด)")
         
-        styled_df = final_df.style.map(style_cells if 'style_cells' in locals() else None, subset=num_headers).apply(style_entire_table, axis=1)
+        # 🚨 แก้ไขจุดบั๊ก: รันระบบสไตล์แบบรวมศูนย์ผ่าน apply รายแถว (ไม่ต้องพึ่งพา .map() ซ้ำซ้อน)
+        styled_df = final_df.style.apply(style_entire_table, axis=1)
         
         col_configurations = {}
         for header in num_headers:
@@ -170,7 +172,7 @@ try:
             column_config=col_configurations
         )
         
-        st.success(f"✨ แก้ไขระบบเรียงเวลาและปรับไฮไลต์แจ้งเตือนเป็นสีฟ้าอ่อนพาสเทลเรียบร้อย สวยงามสบายตาครับ!")
+        st.success(f"✨ แก้ไขระบบเรนเดอร์ตารางเรียบร้อย หน้าตากระชับและไฮไลต์สีฟ้าอ่อนทำงานสมบูรณ์แบบครับ!")
 
 except Exception as err:
     st.error(f"❌ เกิดข้อผิดพลาดในการประมวลผลตาราง: {err}")
