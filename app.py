@@ -35,7 +35,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("📊 Forex Multi-Sheet Data Processor")
-st.subheader("ระบบแยกช่องตามค่าจริง + แก้ไขข้อผิดพลาด Col_A คืนค่าตัวเลขจริงแม่นยำ")
+st.subheader("ระบบแยกช่องตามค่าจริง + แต้มสีเขียว/แดงใน Col_B และดักจับเวลากระโดด")
 
 # ลิงก์ตาราง Google Sheet แหล่งข้อมูลใหม่
 spreadsheet_id = "1Zx94QQ6GZCRws59kWD_-VH_-ZIAK2-R6ihyXwxRjhA8"
@@ -50,7 +50,6 @@ selected_sheet = st.sidebar.radio(
 @st.cache_data(ttl=5)
 def load_sheet_data_raw(sheet_name):
     url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-    # ดึงแบบดิบไม่มี Header เพื่อแยกประมวลผล Row 1 และ Row 2+ เอง
     df_raw = pd.read_csv(url, header=None)
     return df_raw
 
@@ -71,7 +70,7 @@ def get_thai_day_name(date_str):
         return str(date_str)
 
 try:
-    with st.spinner(f"⏳ กำลังดึงข้อมูลและล็อกคืนค่า Col_A ของหน้า {selected_sheet} ..."):
+    with st.spinner(f"⏳ กำลังดึงข้อมูลและปรับสีคอลัมน์ B หน้า {selected_sheet} ..."):
         df_all = load_sheet_data_raw(selected_sheet)
     
     if df_all.empty:
@@ -104,7 +103,7 @@ try:
         col_names = ['Col_A', 'Col_B', 'Time_Col_C'] + [f'Raw_{i}' for i in range(df.shape[1] - 3)]
         df.columns = col_names
         
-        # 🚨 แก้ไขจุดสำคัญ: บังคับแปลง Col_A และ Col_B คืนค่าเป็นตัวเลขจำนวนเต็มดิบๆ (ไม่ให้เพี้ยนเป็น 000000)
+        # แปลง Col_A และ Col_B คืนค่าเป็นตัวเลขดิบ ๆ
         for col in ['Col_A', 'Col_B']:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).round().astype(int)
 
@@ -153,11 +152,9 @@ try:
             processed_matrix.append(new_row)
             
         df_positioned_nums = pd.DataFrame(processed_matrix, columns=num_headers)
-        
-        # รวมร่างคอลัมน์ A B C ที่ค่าถูกต้องแล้ว เข้ากับตารางตัวเลขล็อกพิกัดฝั่งขวา
         final_df = pd.concat([base_cols, df_positioned_nums], axis=1)
         
-        # 5. ระบบสีพาสเทลแยกกลุ่มตัวเลข
+        # 5. ระบบสีพาสเทลแยกกลุ่มตัวเลขฝั่งขวา
         colors = [
             '#FFD1DC', '#FFEEBB', '#D4F0F0', '#CCE2CB', '#FFCBC1', 
             '#E8AEB7', '#B5E2FA', '#EDF2F4', '#F9E5D8', '#E8D7F1',
@@ -168,19 +165,32 @@ try:
         for i, elem in enumerate(unique_sorted_nums):
             color_map[elem] = colors[i % len(colors)]
             
+        # ฟังก์ชันระบายสีเงื่อนไขรายแถวครอบคลุมทุกคอลัมน์
         def style_entire_table(row):
             styles = [''] * len(row)
             row_idx = row.name
             
-            # แต้มสีฟ้าอ่อนพาสเทลเมื่อตรวจเจอเวลากระโดดข้ามช่วง
+            # คอลัมน์ A (ดัชนี 0): แสดงผลจัดตรงกลาง สีตัวอักษรปกติ
+            styles[0] = 'text-align: center; color: #000000;'
+            
+            # 🚨 จุดแก้ไขเด็ดขาด: แต้มสีเขียว-แดงตามเงื่อนไขของตัวเลขใน Col_B (ดัชนี 1) 
+            b_val = row.iloc[1]
+            if b_val == 10:  # สมมุติถ้าเลข 10 แทนฝั่งเขียว (ปรับตัวเลขได้ตามต้องการครับ)
+                styles[1] = 'background-color: #D4F0F0; color: #004D40; font-weight: bold; text-align: center;'
+            elif b_val == 11: # สมมุติถ้าเลข 11 แทนฝั่งแดงอมชมพู 
+                styles[1] = 'background-color: #FFD1DC; color: #880E4F; font-weight: bold; text-align: center;'
+            elif b_val == 12: # เพิ่มกรณีเลข 12 ให้เป็นสีเหลืองพาสเทล/หรือสีส้มตามพฤติกรรม
+                styles[1] = 'background-color: #FFEEBB; color: #E65100; font-weight: bold; text-align: center;'
+            else:             # กรณีตัวเลขอื่นๆ ให้สลับสีพาสเทลจางๆ ตามสไตล์ตารางดิบ
+                styles[1] = 'background-color: #EDF2F4; color: #000000; font-weight: bold; text-align: center;'
+                
+            # คอลัมน์ C (ดัชนี 2): แต้มสีฟ้าอ่อนเมื่อเวลากระโดด
             if row_idx in gap_indices:
                 styles[2] = 'background-color: #E0F7FA; color: #006064; font-weight: bold; text-align: center;'
             else:
                 styles[2] = 'text-align: center; color: #000000;'
-                
-            styles[0] = 'text-align: center; color: #000000;'
-            styles[1] = 'text-align: center; color: #000000;'
             
+            # คอลัมน์ตัวเลขฝั่งขวา (ดัชนี 3 เป็นต้นไป): แต้มสีตามกลุ่มประเภทตัวเลข
             for c_idx in range(3, len(row)):
                 val = row.iloc[c_idx]
                 if val != "" and pd.notna(val) and not isinstance(val, str):
@@ -212,7 +222,7 @@ try:
             column_config=col_configurations
         )
         
-        st.success(f"✨ แก้บั๊ก Col_A เรียบร้อย! ตัวเลข {final_df['Col_A'].iloc[0]} หรือค่าจริงจะแสดงผลถูกต้องตรงหลักแล้วครับ!")
+        st.success(f"✨ เปิดระบบดึงสีเขียว/แดงลงบนคอลัมน์ B เรียบร้อยแล้วครับ หน้าตาสวยเนียนตาเข้าชุดที่สุด!")
 
 except Exception as err:
     st.error(f"❌ เกิดข้อผิดพลาดในการประมวลผลตาราง: {err}")
