@@ -25,7 +25,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("📊 Forex Multi-Sheet Data Processor")
-st.subheader("ระบบแยกช่องตามค่าจริง + ดักจับแจ้งเตือน 'เวลากระโดด' (เวอร์ชันไฮไลต์สีฟ้าอ่อน คมชัดสูง)")
+st.subheader("ระบบแยกช่องตามค่าจริง + ดักจับแจ้งเตือน 'เวลากระโดด' (เวอร์ชันแก้ไขบรรทัดแรกหาย)")
 
 # ลิงก์ตาราง Google Sheet แหล่งข้อมูลใหม่
 spreadsheet_id = "1Zx94QQ6GZCRws59kWD_-VH_-ZIAK2-R6ihyXwxRjhA8"
@@ -40,7 +40,8 @@ selected_sheet = st.sidebar.radio(
 @st.cache_data(ttl=60)
 def load_sheet_data(sheet_name):
     url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-    df_raw = pd.read_csv(url)
+    # 🚨 จุดแก้ไขด่วน: ใส่ header=None เพื่อบังคับไม่ให้ระบบเอาบรรทัดแรก (13:00) ไปทำเป็นชื่อหัวตาราง ข้อมูลจะได้มาครบๆ
+    df_raw = pd.read_csv(url, header=None)
     return df_raw
 
 def parse_time_string(t_str):
@@ -55,27 +56,24 @@ def parse_time_string(t_str):
     return None
 
 try:
-    with st.spinner(f"⏳ กำลังประมวลผลจัดเวลาและบีบช่องฟิตเปรี๊ยะ {selected_sheet} ..."):
+    with st.spinner(f"⏳ กำลังประมวลผลข้อมูลสดแผ่นงาน {selected_sheet} ..."):
         df = load_sheet_data(selected_sheet)
     
     if df.empty:
         st.warning(f"⚠️ ไม่พบข้อมูลในแผ่นงาน {selected_sheet} หรือแผ่นงานว่างเปล่า")
     else:
-        # 3. ล็อกชื่อคอลัมน์และจัดเรียงแถวตามเวลาจริงเพื่อป้องกันบั๊กเวลากระโดด
-        col_names = list(df.columns)
-        col_names[0] = 'Col_A'
-        col_names[1] = 'Col_B'
-        col_names[2] = 'Time_Col_C'
+        # 3. กำหนดชื่อคอลัมน์มาตรฐานชั่วคราวให้ระบบนำไปทำงานต่อได้ง่าย
+        col_names = ['Col_A', 'Col_B', 'Time_Col_C'] + [f'Raw_{i}' for i in range(df.shape[1] - 3)]
         df.columns = col_names
         
-        # จัดเรียงลำดับเวลาจริงให้ถูกต้องก่อนการคำนวณช่องว่างของเวลา
+        # จัดเรียงลำดับเวลาในคอลัมน์ C จากน้อยไปมากให้ถูกต้องแม่นยำ
         df['time_object'] = df['Time_Col_C'].apply(parse_time_string)
         df = df.sort_values(by='time_object').reset_index(drop=True)
         df = df.drop(columns=['time_object'])
         
         base_cols = df.iloc[:, :3].copy()
         
-        # 4. ลอจิกเช็ก "เวลากระโดด" จากตารางที่จัดเรียงเวลาเรียบร้อยแล้ว
+        # 4. ลอจิกเช็กดักจับ "เวลากระโดด" ในคอลัมน์ C (ห่างเกิน 30 นาทีขึ้นไป)
         gap_indices = set()
         for idx in range(1, len(base_cols)):
             prev_time_obj = parse_time_string(base_cols.loc[idx-1, 'Time_Col_C'])
@@ -86,11 +84,10 @@ try:
                 if time_diff < 0:
                     time_diff += 1440 
                 
-                # ถ้าห่างกันเกิน 30 นาที สั่งล็อกตำแหน่งแถวนั้นทันที
                 if time_diff > 30.5: 
                     gap_indices.add(idx)
 
-        # ดึงข้อมูลส่วนตัวเลขฝั่งขวามาจัดล็อกพิกัดตรงช่อง
+        # ดึงข้อมูลส่วนที่เป็นตัวเลขฝั่งขวามาหาค่าตัวเลขที่ไม่ซ้ำทั้งหมดเพื่อขยายคอลัมน์ตัวเลขจริง
         numeric_part = df.iloc[:, 3:].copy()
         all_nums = pd.to_numeric(numeric_part.values.flatten(), errors='coerce')
         all_nums = pd.Series(all_nums).dropna().round().astype(int)
@@ -113,7 +110,7 @@ try:
         df_positioned_nums = pd.DataFrame(processed_matrix, columns=num_headers)
         final_df = pd.concat([base_cols, df_positioned_nums], axis=1)
         
-        # 5. ระบบสีแยกประเภทกลุ่มตัวเลข
+        # 5. ระบบแต่งแต้มสีแยกกลุ่มตัวเลขพาสเทล
         colors = [
             '#FFD1DC', '#FFEEBB', '#D4F0F0', '#CCE2CB', '#FFCBC1', 
             '#E8AEB7', '#B5E2FA', '#EDF2F4', '#F9E5D8', '#E8D7F1',
@@ -124,12 +121,11 @@ try:
         for i, elem in enumerate(unique_sorted_nums):
             color_map[elem] = colors[i % len(colors)]
             
-        # ฟังก์ชันระบายสีเงื่อนไขรายแถว
         def style_entire_table(row):
             styles = [''] * len(row)
             row_idx = row.name
             
-            # ไฮไลต์คอลัมน์ C ด้วยสีฟ้าอ่อนเมื่อเวลากระโดด
+            # แต้มสีฟ้าอ่อนพาสเทลเมื่อตรวจเจอเวลากระโดดข้ามช่วง
             if row_idx in gap_indices:
                 styles[2] = 'background-color: #E0F7FA; color: #006064; font-weight: bold; text-align: center;'
             else:
@@ -138,7 +134,6 @@ try:
             styles[0] = 'text-align: center; color: #000000;'
             styles[1] = 'text-align: center; color: #000000;'
             
-            # แต้มสีฝั่งคอลัมน์ตัวเลขขวาตามประเภท
             for c_idx in range(3, len(row)):
                 val = row.iloc[c_idx]
                 if val != "" and pd.notna(val) and not isinstance(val, str):
@@ -152,11 +147,12 @@ try:
                     
             return styles
 
-        st.markdown(f"### 📋 แผ่นงาน: **{selected_sheet}** (จัดเรียงเวลาถูกต้อง + คอลัมน์ C สีฟ้าอ่อน = ตรวจพบเวลากระโดด)")
+        st.markdown(f"### 📋 แผ่นงาน: **{selected_sheet}** (ข้อมูลบรรทัดแรกมาครบถ้วน คอลัมน์ C สีฟ้าอ่อน = เวลากระโดด)")
         
-        # 🚨 แก้ไขจุดบั๊ก: รันระบบสไตล์แบบรวมศูนย์ผ่าน apply รายแถว (ไม่ต้องพึ่งพา .map() ซ้ำซ้อน)
+        # รันระบบสีผ่าน apply
         styled_df = final_df.style.apply(style_entire_table, axis=1)
         
+        # ล็อกความกว้างช่องตัวเลขฝั่งขวาให้แคบและฟิตพอดีช่องละ 55 พิกเซล ไม่เลื่อนเปิดเอง
         col_configurations = {}
         for header in num_headers:
             col_configurations[header] = st.column_config.Column(
@@ -172,7 +168,7 @@ try:
             column_config=col_configurations
         )
         
-        st.success(f"✨ แก้ไขระบบเรนเดอร์ตารางเรียบร้อย หน้าตากระชับและไฮไลต์สีฟ้าอ่อนทำงานสมบูรณ์แบบครับ!")
+        st.success(f"✨ เรียบร้อยครับคุณวีรพันธ์! ข้อมูลเวลา 13:00 บรรทัดแรกสุดกลับมาแสดงผลในระบบเรียบร้อยแล้วครับ!")
 
 except Exception as err:
     st.error(f"❌ เกิดข้อผิดพลาดในการประมวลผลตาราง: {err}")
