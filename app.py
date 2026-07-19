@@ -24,7 +24,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("📊 Forex Multi-Sheet Data Processor")
-st.subheader("ระบบแยกช่องตามค่าตัวเลขจริง (เวอร์ชันบีบความกว้างช่องให้ฟิตพอดีกับตัวเลข)")
+st.subheader("ระบบแยกช่องตามค่าตัวเลขจริง (เวอร์ชันบีบฟิตตามรูป ล็อกขนาดช่องตัวเลขถาวร)")
 
 # ลิงก์ตาราง Google Sheet แหล่งข้อมูลใหม่
 spreadsheet_id = "1Zx94QQ6GZCRws59kWD_-VH_-ZIAK2-R6ihyXwxRjhA8"
@@ -43,7 +43,7 @@ def load_sheet_data(sheet_name):
     return df_raw
 
 try:
-    with st.spinner(f"⏳ กำลังประมวลผลจัดล็อกพิกัดและบีบช่องแผ่นงาน {selected_sheet} ..."):
+    with st.spinner(f"⏳ กำลังประมวลผลจัดล็อกพิกัดและบีบช่องฟิตเปรี๊ยะ {selected_sheet} ..."):
         df = load_sheet_data(selected_sheet)
     
     if df.empty:
@@ -68,7 +68,7 @@ try:
         # สร้างตารางเปล่า ๆ รอไว้สำหรับเติมตัวเลขให้ตรงช่อง
         processed_matrix = []
         
-        # 3. ลоจิกการล็อกพิกัดหยอดลงล็อกรายช่อง
+        # 3. ลอจิกการล็อกพิกัดหยอดลงล็อกรายช่อง
         for idx, row in numeric_part.iterrows():
             row_nums = pd.to_numeric(row, errors='coerce').dropna().round().astype(int).tolist()
             row_set = set(row_nums)
@@ -108,30 +108,29 @@ try:
                     pass
             return 'text-align: center; color: #000000;'
 
-        st.markdown(f"### 📋 แผ่นงาน: **{selected_sheet}** (ล็อกช่องตรงตำแหน่ง + บีบคอลัมน์ฟิตตัวเลข)")
+        st.markdown(f"### 📋 แผ่นงาน: **{selected_sheet}** (บีบช่องล็อกความกว้างฟิตเปรี๊ยะ ไม่ขยายยืดออก)")
         
         # บังคับระบายสีสไตล์เฉพาะช่องที่มีตัวเลข
         styled_df = final_df.style.map(style_cells, subset=num_headers)
         
-        # 🚨 จุดแก้ไขขั้นเทพ: สร้างคำสั่งบีบขนาดคอลัมน์ตัวเลขให้แคบและฟิตพอดีกับตัวอักษร (กว้างช่องละ 50 พิกเซล)
+        # 🚨 จุดแก้ไขระดับโปร: ล็อกความกว้างของคอลัมน์ตัวเลขให้ผอมฟิตเท่ากันเป๊ะช่องละ 55 พิกเซล ไม่ยอมให้ยืดขยายเอง
         col_configurations = {}
         for header in num_headers:
             col_configurations[header] = st.column_config.Column(
                 header,
-                width="small",  # สั่งให้ช่องมีขนาดเล็กกะทัดรัด
+                width=55,  # บังคับความกว้างล็อกตายตัว 55 พิกเซล
                 help=f"ช่องข้อมูลหมายเลข {header}"
             )
             
-        # แสดงตารางผลลัพธ์แบบบีบช่องฟิตเปรี๊ยะ สวยงามมาก
+        # แสดงตารางผลลัพธ์แบบปิดระบบขยายหน้าจออัตโนมัติ (use_container_width=False)
         st.dataframe(
             styled_df,
             height=650,
-            use_container_width=True,
-            column_config=col_configurations # เปิดใช้งานระบบล็อกความกว้างคอลัมน์ฟิตตัวเลข
+            use_container_width=False,  # 🚨 ล็อกไม่ให้ตารางแอบขยายยืดขวาเองเด็ดขาด
+            column_config=col_configurations
         )
         
-        st.success(f"✨ ทำการบีบช่องตัวเลขให้ฟิตพอดีตัวอักษรเรียบร้อยครับ ดูกระชับและสบายตารุ่นใหญ่ที่สุด!")
+        st.success(f"✨ ทำการบีบล็อกช่องตัวเลขฝั่งขวาให้ฟิตกระชับชิดติดกันตามรูปเรียบร้อยครับ!")
 
 except Exception as err:
     st.error(f"❌ เกิดข้อผิดพลาดในการประมวลผลตาราง: {err}")
-
