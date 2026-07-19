@@ -35,7 +35,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("📊 Forex Multi-Sheet Data Processor")
-st.subheader("ระบบดึงค่า Code/Date จากแถวแรก + จัดล็อกพิกัดข้อมูลเริ่มที่ Row 2")
+st.subheader("ระบบแยกช่องตามค่าจริง + แก้ไขข้อผิดพลาด Col_A คืนค่าตัวเลขจริงแม่นยำ")
 
 # ลิงก์ตาราง Google Sheet แหล่งข้อมูลใหม่
 spreadsheet_id = "1Zx94QQ6GZCRws59kWD_-VH_-ZIAK2-R6ihyXwxRjhA8"
@@ -47,14 +47,13 @@ selected_sheet = st.sidebar.radio(
     ["Data1", "Data2", "Data3", "Data4", "Data5", "Data6", "Data7", "Data8", "Data9", "Data10"]
 )
 
-@st.cache_data(ttl=5) # โหลดสดอัปเดตไวใน 5 วินาที
+@st.cache_data(ttl=5)
 def load_sheet_data_raw(sheet_name):
     url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
-    # ดึงแบบไม่ให้มีหัวตาราง เพื่อจับแถวที่ 1 และแถวที่ 2 แยกกันเองตามสั่ง
+    # ดึงแบบดิบไม่มี Header เพื่อแยกประมวลผล Row 1 และ Row 2+ เอง
     df_raw = pd.read_csv(url, header=None)
     return df_raw
 
-# ฟังก์ชันแปลงชื่อวันภาษาอังกฤษในตารางให้เป็นภาษาไทยที่ถูกต้องอิงตามปฏิทินจริง
 def get_thai_day_name(date_str):
     if pd.isna(date_str) or str(date_str).strip() == "" or str(date_str).lower() == "nan":
         return "ไม่ระบุวันที่"
@@ -72,47 +71,50 @@ def get_thai_day_name(date_str):
         return str(date_str)
 
 try:
-    with st.spinner(f"⏳ กำลังประมวลผลแยกโครงสร้างข้อมูล {selected_sheet} ..."):
+    with st.spinner(f"⏳ กำลังดึงข้อมูลและล็อกคืนค่า Col_A ของหน้า {selected_sheet} ..."):
         df_all = load_sheet_data_raw(selected_sheet)
     
     if df_all.empty:
         st.warning(f"⚠️ ไม่พบข้อมูลในแผ่นงาน {selected_sheet}")
     else:
-        # 3. 🚨 ลอจิกขั้นเทพ ดึงค่า Code และ Date จากแถวแรกสุด (Row 1)
+        # 3. ดึงค่าจากแถวแรกสุด (Row 1) ไปทำหัวกระดาษ
         row_one = df_all.iloc[0]
-        
-        # ช่อง B1 (index 1) คือค่า Code
         c_val = row_one.iloc[1] if len(row_one) > 1 else "ไม่มีข้อมูล"
-        # ช่อง D1 (index 3) คือค่า Date
         d_val = row_one.iloc[3] if len(row_one) > 3 else "ไม่มีข้อมูล"
         
-        # จัดรูปแบบข้อความตัวเลข Code
         if pd.notna(c_val) and str(c_val).strip() != "" and str(c_val).lower() != "nan":
-            try:
-                code_text = str(int(float(c_val)))
-            except:
-                code_text = str(c_val)
+            try: code_text = str(int(float(c_val)))
+            except: code_text = str(c_val)
         else:
             code_text = "ไม่ระบุ"
             
         date_text = get_thai_day_name(d_val)
 
-        # 🚨 โชว์ป้ายหัวข้อสวยงาม คมชัดสูง อ่านข้อมูลจากแถวแรกแม่นยำ 100%
+        # โชว์ป้ายหัวข้อ
         st.markdown(f"""
         <div class="header-box">
             📋 แผ่นงาน: {selected_sheet} &nbsp;&nbsp;|&nbsp;&nbsp; Code = {code_text} &nbsp;&nbsp;|&nbsp;&nbsp; Date = {date_text}
         </div>
         """, unsafe_allow_html=True)
 
-        # 4. 🚨 ขยับเลื่อนตัดข้อมูลให้เริ่มอ่านตั้งแต่ แถวที่ 2 (Row 2) เป็นต้นไป
+        # 4. ขยับเลื่อนตัดข้อมูลตารางจริง เริ่มอ่านที่ แถวที่ 2 (Row 2) เป็นต้นไป
         df = df_all.iloc[1:].reset_index(drop=True)
 
-        # ตั้งชื่อคอลัมน์มาตรฐานชั่วคราวให้ระบบทำงานต่อ
+        # ตั้งชื่อคอลัมน์มาตรฐานชั่วคราว
         col_names = ['Col_A', 'Col_B', 'Time_Col_C'] + [f'Raw_{i}' for i in range(df.shape[1] - 3)]
         df.columns = col_names
         
+        # 🚨 แก้ไขจุดสำคัญ: บังคับแปลง Col_A และ Col_B คืนค่าเป็นตัวเลขจำนวนเต็มดิบๆ (ไม่ให้เพี้ยนเป็น 000000)
+        for col in ['Col_A', 'Col_B']:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).round().astype(int)
+
         # จัดเรียงลำดับเวลาในคอลัมน์ C จากน้อยไปมาก
-        df['time_object'] = df['Time_Col_C'].apply(parse_time_string if 'parse_time_string' in locals() else lambda x: datetime.strptime(str(x).replace('.', ':').strip(), '%H:%M') if pd.notna(x) else None)
+        def quick_parse(t):
+            if pd.isna(t): return None
+            try: return datetime.strptime(str(t).replace('.', ':').strip(), '%H:%M')
+            except: return None
+            
+        df['time_object'] = df['Time_Col_C'].apply(quick_parse)
         df = df.sort_values(by='time_object').reset_index(drop=True)
         df = df.drop(columns=['time_object'])
         
@@ -121,10 +123,6 @@ try:
         # ลอจิกเช็กดักจับ "เวลากระโดด" ในคอลัมน์ C (ห่างเกิน 30 นาที)
         gap_indices = set()
         for idx in range(1, len(base_cols)):
-            def quick_parse(t):
-                if pd.isna(t): return None
-                try: return datetime.strptime(str(t).replace('.', ':').strip(), '%H:%M')
-                except: return None
             prev_time_obj = quick_parse(base_cols.loc[idx-1, 'Time_Col_C'])
             curr_time_obj = quick_parse(base_cols.loc[idx, 'Time_Col_C'])
             
@@ -134,7 +132,7 @@ try:
                 if time_diff > 30.5: 
                     gap_indices.add(idx)
 
-        # ดึงข้อมูลส่วนที่เป็นตัวเลขฝั่งขวามาจัดพิกัดลงล็อกหัวข้อจริง
+        # ดึงข้อมูลส่วนตัวเลขฝั่งขวามาจัดพิกัดลงล็อกช่องจริง
         numeric_part = df.iloc[:, 3:].copy()
         all_nums = pd.to_numeric(numeric_part.values.flatten(), errors='coerce')
         all_nums = pd.Series(all_nums).dropna().round().astype(int)
@@ -155,6 +153,8 @@ try:
             processed_matrix.append(new_row)
             
         df_positioned_nums = pd.DataFrame(processed_matrix, columns=num_headers)
+        
+        # รวมร่างคอลัมน์ A B C ที่ค่าถูกต้องแล้ว เข้ากับตารางตัวเลขล็อกพิกัดฝั่งขวา
         final_df = pd.concat([base_cols, df_positioned_nums], axis=1)
         
         # 5. ระบบสีพาสเทลแยกกลุ่มตัวเลข
@@ -172,6 +172,7 @@ try:
             styles = [''] * len(row)
             row_idx = row.name
             
+            # แต้มสีฟ้าอ่อนพาสเทลเมื่อตรวจเจอเวลากระโดดข้ามช่วง
             if row_idx in gap_indices:
                 styles[2] = 'background-color: #E0F7FA; color: #006064; font-weight: bold; text-align: center;'
             else:
@@ -211,7 +212,7 @@ try:
             column_config=col_configurations
         )
         
-        st.success(f"✨ สำเร็จ! อ่านหัวข้อแถว 1 และดึงตารางข้อมูลเริ่มที่ Row 2 เรียบร้อย สมบูรณ์แบบที่สุดครับ!")
+        st.success(f"✨ แก้บั๊ก Col_A เรียบร้อย! ตัวเลข {final_df['Col_A'].iloc[0]} หรือค่าจริงจะแสดงผลถูกต้องตรงหลักแล้วครับ!")
 
 except Exception as err:
     st.error(f"❌ เกิดข้อผิดพลาดในการประมวลผลตาราง: {err}")
