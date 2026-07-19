@@ -35,7 +35,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("📊 Forex Multi-Sheet Data Processor")
-st.subheader("ระบบแยกช่องตามค่าจริง + ดักจับแจ้งเตือน 'เวลากระโดด' พร้อมแสดง Code และวันที่")
+st.subheader("ระบบแยกช่องตามค่าจริง + ดักจับแจ้งเตือน 'เวลากระโดด' พร้อมแสดง Code และวันที่ (ล็อกแถวตรงพิกัด)")
 
 # ลิงก์ตาราง Google Sheet แหล่งข้อมูลใหม่
 spreadsheet_id = "1Zx94QQ6GZCRws59kWD_-VH_-ZIAK2-R6ihyXwxRjhA8"
@@ -47,16 +47,23 @@ selected_sheet = st.sidebar.radio(
     ["Data1", "Data2", "Data3", "Data4", "Data5", "Data6", "Data7", "Data8", "Data9", "Data10"]
 )
 
+# หาเลขดัชนีแถวตามหน้าชีทที่เลือก (Data1 = แถว index 0, Data2 = แถว index 1)
+sheet_mapping = {
+    "Data1": 0, "Data2": 1, "Data3": 2, "Data4": 3, "Data5": 4,
+    "Data6": 5, "Data7": 6, "Data8": 7, "Data9": 8, "Data10": 9
+}
+target_row_idx = sheet_mapping.get(selected_sheet, 0)
+
 # ฟังก์ชันดึงข้อมูลสดจากแผ่นงานข้อมูล
-@st.cache_data(ttl=10) # ลด Cache เหลือ 10 วินาที เพื่อให้ข้อมูลอัปเดตไวสะใจ
+@st.cache_data(ttl=5) # เร่งความเร็วข้อมูลสด 5 วินาที
 def load_sheet_data(sheet_name):
     url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:csv&sheet={sheet_name}"
     df_raw = pd.read_csv(url, header=None)
     return df_raw
 
-# 🚨 ปรับฟังก์ชันดึงข้อมูลชีท Code ใหม่: อ่านแบบดั่งเดิม (header=None) เพื่อไม่ให้หลุดข้อมูลแถวแรก
-@st.cache_data(ttl=10)
-def load_code_sheet():
+# ฟังก์ชันดึงข้อมูลชีท Code แบบดิบ (header=None) เพื่อดึงตามเลขแถวเป๊ะๆ
+@st.cache_data(ttl=5)
+def load_code_sheet_raw():
     try:
         url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/gviz/tq?tqx=out:csv&sheet=Code"
         df_code = pd.read_csv(url, header=None)
@@ -75,14 +82,16 @@ def parse_time_string(t_str):
             continue
     return None
 
-# ฟังก์ชันแปลงชื่อวันภาษาอังกฤษให้เป็นภาษาไทย
+# ฟังก์ชันแปลงชื่อวันภาษาอังกฤษให้เป็นภาษาไทยแบบ "วันจันทร์ - วันอาทิตย์"
 def get_thai_day_name(date_str):
-    if pd.isna(date_str) or str(date_str).strip() == "":
+    if pd.isna(date_str) or str(date_str).strip() == "" or str(date_str).lower() == "nan":
         return "ไม่ระบุวันที่"
     try:
-        for fmt in ('%d/%m/%Y', '%Y-%m-%d', '%d-%m-%Y'):
+        # ล้างช่องว่างและรองรับการคั่นแบบต่างๆ
+        d_cleaned = str(date_str).strip().replace('-', '/')
+        for fmt in ('%d/%m/%Y', '%Y/%m/%d', '%d/%m/%y'):
             try:
-                dt = datetime.strptime(str(date_str).strip(), fmt)
+                dt = datetime.strptime(d_cleaned, fmt)
                 day_names = ["วันจันทร์", "วันอังคาร", "วันพุธ", "วันพฤหัสบดี", "วันศุกร์", "วันเสาร์", "วันอาทิตย์"]
                 return f"{dt.strftime('%d/%m/%Y')} {day_names[dt.weekday()]} "
             except ValueError:
@@ -92,41 +101,36 @@ def get_thai_day_name(date_str):
         return str(date_str)
 
 try:
-    with st.spinner(f"⏳ กำลังเชื่อมโยงข้อมูลแผ่นงาน {selected_sheet} ..."):
+    with st.spinner(f"⏳ กำลังประมวลผลจัดพิกัดแถวตาราง {selected_sheet} ..."):
         df = load_sheet_data(selected_sheet)
-        df_code_info = load_code_sheet()
+        df_code_raw = load_code_sheet_raw()
     
     if df.empty:
         st.warning(f"⚠️ ไม่พบข้อมูลในแผ่นงาน {selected_sheet} หรือแผ่นงานว่างเปล่า")
     else:
-        # 3. ลอจิกใหม่กวาดหาข้อมูลจากชีท Code แบบทนทาน 100%
+        # 3. 🚨 ไม้ตายดึงตรงแถว: ดึงค่าจากชีท Code ตามลำดับแถวที่ตรงกับหน้า Data ทันที
         code_text = "ไม่พบข้อมูล"
         date_text = "ไม่พบข้อมูล"
         
-        if df_code_info is not None and not df_code_info.empty:
-            sheet_keyword = selected_sheet.lower().strip()
-            
-            # วิ่งหาทีละแถวในชีท Code
-            for idx, row in df_code_info.iterrows():
-                # ตรวจสอบคอลัมน์แรก (ตำแหน่ง 0) ว่าตรงกับคำว่า data1 - data10 ไหม
-                cell_val = str(row.iloc[0]).lower().strip() if pd.notna(row.iloc[0]) else ""
+        if df_code_raw is not None and not df_code_raw.empty:
+            # เช็กว่าชีท Code มีจำนวนแถวครอบคลุมถึงหน้าการแสดงผลไหม
+            if target_row_idx < len(df_code_raw):
+                row_data = df_code_raw.iloc[target_row_idx]
                 
-                if cell_val == sheet_keyword:
-                    # คอลัมน์ที่ 2 (ตำแหน่ง 1) คือค่า Code
-                    c_val = row.iloc[1] if df_code_info.shape[1] > 1 else ""
-                    # คอลัมน์ที่ 3 (ตำแหน่ง 2) คือค่า Date
-                    d_val = row.iloc[2] if df_code_info.shape[1] > 2 else ""
-                    
-                    if pd.notna(c_val) and str(c_val).strip() != "":
-                        try:
-                            code_text = str(int(float(c_val)))
-                        except:
-                            code_text = str(c_val)
-                            
-                    date_text = get_thai_day_name(d_val)
-                    break
+                # คอลัมน์ที่ 2 (index 1) คือค่า Code
+                c_val = row_data.iloc[1] if len(row_data) > 1 else ""
+                # คอลัมน์ที่ 3 (index 2) คือค่า Date
+                d_val = row_data.iloc[2] if len(row_data) > 2 else ""
+                
+                if pd.notna(c_val) and str(c_val).strip() != "" and str(c_val).lower() != "nan":
+                    try:
+                        code_text = str(int(float(c_val)))
+                    except:
+                        code_text = str(c_val)
+                        
+                date_text = get_thai_day_name(d_val)
 
-        # โชว์ผลลัพธ์หัวกระดาษแบบใหม่ เชื่อมต่อตรงล็อกแน่นอน
+        # แสดงแถบหัวตารางแสดงผลสวยงาม คมชัดสูง ลิงก์ตรงแน่นอน
         st.markdown(f"""
         <div class="header-box">
             📋 แผ่นงาน: {selected_sheet} &nbsp;&nbsp;|&nbsp;&nbsp; Code = {code_text} &nbsp;&nbsp;|&nbsp;&nbsp; Date = {date_text}
@@ -144,7 +148,7 @@ try:
         
         base_cols = df.iloc[:, :3].copy()
         
-        # ลอจิกเช็กดักจับ "เวลากระโดด" ในคอลัมน์ C (ห่างเกิน 30 นาที)
+        # ลоจิกเช็กดักจับ "เวลากระโดด" ในคอลัมน์ C (ห่างเกิน 30 นาที)
         gap_indices = set()
         for idx in range(1, len(base_cols)):
             prev_time_obj = parse_time_string(base_cols.loc[idx-1, 'Time_Col_C'])
@@ -236,7 +240,7 @@ try:
             column_config=col_configurations
         )
         
-        st.success(f"✨ แก้ไขระบบเชื่อมโยงเรียบร้อย ข้อมูลดึงมาแสดงผลถูกต้องสมบูรณ์แบบแล้วครับ!")
+        st.success(f"✨ ซิงค์สำเร็จแบบล็อกแถวตรงพิกัด! โชว์ค่า Code และแปลงวันที่ จันทร์-อาทิตย์ ให้เรียบร้อยครับ!")
 
 except Exception as err:
     st.error(f"❌ เกิดข้อผิดพลาดในการประมวลผลตาราง: {err}")
