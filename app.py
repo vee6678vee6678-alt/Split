@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -24,7 +25,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("📊 Forex Multi-Sheet Data Processor")
-st.subheader("ระบบแยกประเภท เรียงลำดับตัวเลขน้อย-มาก และเปลี่ยนหัวข้อเป็น 1-XX")
+st.subheader("ระบบแยกช่องตามค่าตัวเลขจริง (ล็อกตำแหน่งตรงตามหัวคอลัมน์ ไม่ติดกัน)")
 
 # ลิงก์ตาราง Google Sheet แหล่งข้อมูลใหม่
 spreadsheet_id = "1Zx94QQ6GZCRws59kWD_-VH_-ZIAK2-R6ihyXwxRjhA8"
@@ -43,7 +44,7 @@ def load_sheet_data(sheet_name):
     return df_raw
 
 try:
-    with st.spinner(f"⏳ กำลังประมวลผลจัดเรียงตัวเลขแผ่นงาน {selected_sheet} ..."):
+    with st.spinner(f"⏳ กำลังประมวลผลจัดล็อกพิกัดตัวเลขแผ่นงาน {selected_sheet} ..."):
         df = load_sheet_data(selected_sheet)
     
     if df.empty:
@@ -52,34 +53,43 @@ try:
         # เก็บ 3 คอลัมน์แรกไว้คงที่ (Date, Time, Open/Close)
         base_cols = df.iloc[:, :3].copy()
         
-        # ดึงข้อมูลตัวเลขตั้งแต่คอลัมน์ที่ 4 เป็นต้นไป
+        # ดึงข้อมูลส่วนที่เป็นตัวเลขฝั่งขวามาหาค่าตัวเลขทั้งหมดที่มีในชีทนี้
         numeric_part = df.iloc[:, 3:].copy()
         
-        processed_rows = []
+        # กรองแปลงค่าให้เป็นตัวเลขจำนวนเต็ม และหาค่าที่ไม่ซ้ำ (Unique Numbers)
+        all_nums = pd.to_numeric(numeric_part.values.flatten(), errors='coerce')
+        all_nums = pd.Series(all_nums).dropna().round().astype(int)
         
-        # 3. ลอจิกการปัดเศษ -> ลบค่าว่าง -> เรียงจากน้อยไปมากในแต่ละแถว
+        # นำตัวเลขทั้งหมดมาเรียงลำดับจากน้อยไปมาก เพื่อใช้ทำเป็นหัวคอลัมน์ดิ่งลงมา
+        unique_sorted_nums = sorted(all_nums.unique())
+        
+        # แปลงเป็นข้อความเพื่อใช้เป็นชื่อหัวคอลัมน์ในตารางใหม่
+        num_headers = [str(n) for n in unique_sorted_nums]
+        
+        # สร้างตารางเปล่า ๆ รอไว้สำหรับเติมตัวเลขให้ตรงช่อง
+        processed_matrix = []
+        
+        # 3. ลอจิกการล็อกพิกัด: วิ่งดูทีละแถว ถ้าแถวนั้นมีเลขตรงกับหัวคอลัมน์ไหน ให้เอาเลขนั้นไปหยอดลงช่องนั้น
         for idx, row in numeric_part.iterrows():
-            # แปลงเป็นตัวเลข, ปัดเศษเป็นจำนวนเต็ม (ไม่มีทศนิยม), และลบค่า NaN ออก
-            valid_nums = pd.to_numeric(row, errors='coerce').dropna().round().astype(int).tolist()
-            # จัดเรียงจากน้อยไปมาก
-            valid_nums.sort()
-            processed_rows.append(valid_nums)
+            # ดึงเลขในแถวนั้นมาปัดเศษและทำเป็นเซ็ตเพื่อเช็กความไว
+            row_nums = pd.to_numeric(row, errors='coerce').dropna().round().astype(int).tolist()
+            row_set = set(row_nums)
             
-        # สร้าง DataFrame ใหม่จากตัวเลขที่จัดเรียงแล้ว
-        df_sorted_nums = pd.DataFrame(processed_rows)
+            new_row = []
+            for n in unique_sorted_nums:
+                if n in row_set:
+                    new_row.append(n) # ถ้าแถวนั้นมีเลขนี้ ให้ใส่เลขนี้ลงไปในช่อง
+                else:
+                    new_row.append("") # ถ้าไม่มี ให้ปล่อยเป็นช่องว่าง
+            processed_matrix.append(new_row)
+            
+        # สร้าง DataFrame ส่วนตัวเลขตามพิกัดหัวข้อตัวเลขจริง
+        df_positioned_nums = pd.DataFrame(processed_matrix, columns=num_headers)
         
-        # 4. ตั้งชื่อหัวกระดาษเป็นลำดับตัวเลข 1, 2, 3, ... จนถึง XX
-        new_headers = [str(i+1) for i in range(df_sorted_nums.shape[1])]
-        df_sorted_nums.columns = new_headers
+        # รวมร่าง 3 คอลัมน์แรก เข้ากับตารางตัวเลขล็อกพิกัด
+        final_df = pd.concat([base_cols, df_positioned_nums], axis=1)
         
-        # รวมร่างคอลัมน์หลัก A-C กับคอลัมน์ตัวเลขที่จัดระเบียบเรียบร้อยแล้ว
-        final_df = pd.concat([base_cols, df_sorted_nums], axis=1)
-        
-        # 5. ระบบแต้มสีตามกลุ่มตัวเลข (ตัวเลขไหนเหมือนกันในหน้านั้น จะได้สีเดียวกัน)
-        all_elements = df_sorted_nums.values.flatten()
-        unique_elements = pd.Series(all_elements).dropna().unique()
-        
-        # ชุดสีพาสเทลคมชัด สบายสายตารุ่นใหญ่
+        # 4. ระบบแต่งแต้มสีตามกลุ่มตัวเลข (เลขตัวเดียวกันดิ่งลงมาแถวไหนก็สีเดียวกันทั้งหมด)
         colors = [
             '#FFD1DC', '#FFEEBB', '#D4F0F0', '#CCE2CB', '#FFCBC1', 
             '#E8AEB7', '#B5E2FA', '#EDF2F4', '#F9E5D8', '#E8D7F1',
@@ -87,30 +97,33 @@ try:
         ]
         
         color_map = {}
-        for i, elem in enumerate(unique_elements):
+        for i, elem in enumerate(unique_sorted_nums):
             color_map[elem] = colors[i % len(colors)]
             
         def style_cells(val):
-            # ตรวจสอบและสไตล์เฉพาะช่องที่เป็นตัวเลขจำนวนเต็ม
-            if pd.notna(val) and not isinstance(val, str):
-                val_int = int(round(val))
-                if val_int in color_map:
-                    return f'background-color: {color_map[val_int]}; color: #000000; font-weight: bold; text-align: center;'
+            # ตรวจสอบว่าช่องนั้นไม่ใช่ช่องว่าง และมีค่าตรงในระบบสี
+            if val != "" and pd.notna(val) and not isinstance(val, str):
+                try:
+                    val_int = int(val)
+                    if val_int in color_map:
+                        return f'background-color: {color_map[val_int]}; color: #000000; font-weight: bold; text-align: center;'
+                except:
+                    pass
             return 'text-align: center; color: #000000;'
 
-        st.markdown(f"### 📋 แผ่นงาน: **{selected_sheet}** (เรียงลำดับน้อย ➡️ มาก คมชัดสูง)")
+        st.markdown(f"### 📋 แผ่นงาน: **{selected_sheet}** (ล็อกช่องตรงตามค่าหัวข้อตัวเลขอย่างแม่นยำ)")
         
-        # บังคับระบายสีเฉพาะคอลัมน์ฝั่งขวา (1-XX)
-        styled_df = final_df.style.map(style_cells, subset=new_headers)
+        # บังคับระบายสีสไตล์เฉพาะช่องที่มีตัวเลข
+        styled_df = final_df.style.map(style_cells, subset=num_headers)
         
-        # ปรับการแสดงผลตารางให้เหมาะสม ไม่มีทศนิยม .0 กวนใจ
+        # แสดงตารางผลลัพธ์แบบคลีน ๆ ไม่มีทศนิยมกวนใจ
         st.dataframe(
             styled_df,
             height=650,
             use_container_width=True
         )
         
-        st.success(f"✨ จัดเรียงช่องตัวเลขจากน้อยไปมาก และเปลี่ยนหัวข้อเป็น 1-{len(new_headers)} เรียบร้อย สวยงามครับ!")
+        st.success(f"✨ แยกช่องตรงหลักเรียบร้อย! หัวคอลัมน์รันตามค่าเลขจริง ตัวเลขจะล็อกตรงช่องของมันเองไม่ติดกันแล้วครับ!")
 
 except Exception as err:
     st.error(f"❌ เกิดข้อผิดพลาดในการประมวลผลตาราง: {err}")
