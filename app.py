@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -25,7 +24,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("📊 Forex Multi-Sheet Data Processor")
-st.subheader("ระบบแยกช่องตามค่าตัวเลขจริง (ล็อกตำแหน่งตรงตามหัวคอลัมน์ ไม่ติดกัน)")
+st.subheader("ระบบแยกช่องตามค่าตัวเลขจริง (เวอร์ชันบีบความกว้างช่องให้ฟิตพอดีกับตัวเลข)")
 
 # ลิงก์ตาราง Google Sheet แหล่งข้อมูลใหม่
 spreadsheet_id = "1Zx94QQ6GZCRws59kWD_-VH_-ZIAK2-R6ihyXwxRjhA8"
@@ -44,7 +43,7 @@ def load_sheet_data(sheet_name):
     return df_raw
 
 try:
-    with st.spinner(f"⏳ กำลังประมวลผลจัดล็อกพิกัดตัวเลขแผ่นงาน {selected_sheet} ..."):
+    with st.spinner(f"⏳ กำลังประมวลผลจัดล็อกพิกัดและบีบช่องแผ่นงาน {selected_sheet} ..."):
         df = load_sheet_data(selected_sheet)
     
     if df.empty:
@@ -69,18 +68,17 @@ try:
         # สร้างตารางเปล่า ๆ รอไว้สำหรับเติมตัวเลขให้ตรงช่อง
         processed_matrix = []
         
-        # 3. ลอจิกการล็อกพิกัด: วิ่งดูทีละแถว ถ้าแถวนั้นมีเลขตรงกับหัวคอลัมน์ไหน ให้เอาเลขนั้นไปหยอดลงช่องนั้น
+        # 3. ลоจิกการล็อกพิกัดหยอดลงล็อกรายช่อง
         for idx, row in numeric_part.iterrows():
-            # ดึงเลขในแถวนั้นมาปัดเศษและทำเป็นเซ็ตเพื่อเช็กความไว
             row_nums = pd.to_numeric(row, errors='coerce').dropna().round().astype(int).tolist()
             row_set = set(row_nums)
             
             new_row = []
             for n in unique_sorted_nums:
                 if n in row_set:
-                    new_row.append(n) # ถ้าแถวนั้นมีเลขนี้ ให้ใส่เลขนี้ลงไปในช่อง
+                    new_row.append(n)
                 else:
-                    new_row.append("") # ถ้าไม่มี ให้ปล่อยเป็นช่องว่าง
+                    new_row.append("")
             processed_matrix.append(new_row)
             
         # สร้าง DataFrame ส่วนตัวเลขตามพิกัดหัวข้อตัวเลขจริง
@@ -89,7 +87,7 @@ try:
         # รวมร่าง 3 คอลัมน์แรก เข้ากับตารางตัวเลขล็อกพิกัด
         final_df = pd.concat([base_cols, df_positioned_nums], axis=1)
         
-        # 4. ระบบแต่งแต้มสีตามกลุ่มตัวเลข (เลขตัวเดียวกันดิ่งลงมาแถวไหนก็สีเดียวกันทั้งหมด)
+        # 4. ระบบแต่งแต้มสีตามกลุ่มตัวเลข
         colors = [
             '#FFD1DC', '#FFEEBB', '#D4F0F0', '#CCE2CB', '#FFCBC1', 
             '#E8AEB7', '#B5E2FA', '#EDF2F4', '#F9E5D8', '#E8D7F1',
@@ -101,7 +99,6 @@ try:
             color_map[elem] = colors[i % len(colors)]
             
         def style_cells(val):
-            # ตรวจสอบว่าช่องนั้นไม่ใช่ช่องว่าง และมีค่าตรงในระบบสี
             if val != "" and pd.notna(val) and not isinstance(val, str):
                 try:
                     val_int = int(val)
@@ -111,19 +108,30 @@ try:
                     pass
             return 'text-align: center; color: #000000;'
 
-        st.markdown(f"### 📋 แผ่นงาน: **{selected_sheet}** (ล็อกช่องตรงตามค่าหัวข้อตัวเลขอย่างแม่นยำ)")
+        st.markdown(f"### 📋 แผ่นงาน: **{selected_sheet}** (ล็อกช่องตรงตำแหน่ง + บีบคอลัมน์ฟิตตัวเลข)")
         
         # บังคับระบายสีสไตล์เฉพาะช่องที่มีตัวเลข
         styled_df = final_df.style.map(style_cells, subset=num_headers)
         
-        # แสดงตารางผลลัพธ์แบบคลีน ๆ ไม่มีทศนิยมกวนใจ
+        # 🚨 จุดแก้ไขขั้นเทพ: สร้างคำสั่งบีบขนาดคอลัมน์ตัวเลขให้แคบและฟิตพอดีกับตัวอักษร (กว้างช่องละ 50 พิกเซล)
+        col_configurations = {}
+        for header in num_headers:
+            col_configurations[header] = st.column_config.Column(
+                header,
+                width="small",  # สั่งให้ช่องมีขนาดเล็กกะทัดรัด
+                help=f"ช่องข้อมูลหมายเลข {header}"
+            )
+            
+        # แสดงตารางผลลัพธ์แบบบีบช่องฟิตเปรี๊ยะ สวยงามมาก
         st.dataframe(
             styled_df,
             height=650,
-            use_container_width=True
+            use_container_width=True,
+            column_config=col_configurations # เปิดใช้งานระบบล็อกความกว้างคอลัมน์ฟิตตัวเลข
         )
         
-        st.success(f"✨ แยกช่องตรงหลักเรียบร้อย! หัวคอลัมน์รันตามค่าเลขจริง ตัวเลขจะล็อกตรงช่องของมันเองไม่ติดกันแล้วครับ!")
+        st.success(f"✨ ทำการบีบช่องตัวเลขให้ฟิตพอดีตัวอักษรเรียบร้อยครับ ดูกระชับและสบายตารุ่นใหญ่ที่สุด!")
 
 except Exception as err:
     st.error(f"❌ เกิดข้อผิดพลาดในการประมวลผลตาราง: {err}")
+
