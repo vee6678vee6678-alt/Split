@@ -35,7 +35,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 st.title("📊 Forex Multi-Sheet Data Processor")
-st.subheader("ระบบแยกช่องตามค่าจริง + แก้ไขสีคอลัมน์ B ให้ล็อกสีตรงตามต้นฉบับ 100%")
+st.subheader("ระบบแยกช่องตามค่าจริง (Fix สี Col_B: Data1 = เขียวถาวร | Data2 = แดงถาวร)")
 
 # ลิงก์ตาราง Google Sheet แหล่งข้อมูลใหม่
 spreadsheet_id = "1Zx94QQ6GZCRws59kWD_-VH_-ZIAK2-R6ihyXwxRjhA8"
@@ -70,7 +70,7 @@ def get_thai_day_name(date_str):
         return str(date_str)
 
 try:
-    with st.spinner(f"⏳ กำลังประมวลผลแมตช์สีคอลัมน์ B ของหน้า {selected_sheet} ..."):
+    with st.spinner(f"⏳ กำลังโหลดและล็อกสีคอลัมน์ B ประจำหน้า {selected_sheet} ..."):
         df_all = load_sheet_data_raw(selected_sheet)
     
     if df_all.empty:
@@ -107,20 +107,23 @@ try:
         for col in ['Col_A', 'Col_B']:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).round().astype(int)
 
-        # 🚨 วิเคราะห์พฤติกรรมข้อมูลในคอลัมน์ B ล่วงหน้าเพื่อเลือกสีพื้นหลังหลักยกแผงให้ตรงกับหน้าชีทจริง
-        # ถ้าในหน้านั้นมีค่าเฉลี่ยของเลขต่ำ (เช่น เลข 10, 11) หรือเป็นชีท Data2, Data4 ระบบจะเลือกใช้สีตามสไตล์ต้นฉบับ
-        b_values = df['Col_B'].tolist()
-        has_twelve = 12 in b_values
-        
-        # คัดกรองโทนสีพื้นหลังหลักของคอลัมน์ B ประจำหน้านั้น ๆ 
-        if selected_sheet in ["Data2", "Data4", "Data6"] or (has_twelve and b_values.count(12) > len(b_values)/3):
-            # โทนสีเขียวพาสเทลอ่อนใส แบบในรูปภาพที่ 2 ของคุณวีรพันธ์
+        # 🚨 จุดแก้ไขเด็ดขาด: Fix สีคอลัมน์ B แบบล็อกตายตัว 100% ตามคำสั่งเป๊ะ ๆ
+        if selected_sheet == "Data1":
+            # Data1 ล็อกแต้มสีเขียวพาสเทลเสมอ
             b_bg_color = '#E2EFDA' 
             b_text_color = '#375623'
-        else:
-            # โทนสีส้มแดงพาสเทลละมุน แบบในรูปภาพที่ 1 ของคุณวีรพันธ์
+        elif selected_sheet == "Data2":
+            # Data2 ล็อกแต้มสีส้มแดงพาสเทลเสมอ
             b_bg_color = '#FCE4D6' 
             b_text_color = '#C65911'
+        else:
+            # หน้าอื่นๆ สลับตามค่าเริ่มต้น (หรือกำหนดเพิ่มได้ครับ)
+            if selected_sheet in ["Data4", "Data6", "Data8"]:
+                b_bg_color = '#E2EFDA' # เขียว
+                b_text_color = '#375623'
+            else:
+                b_bg_color = '#FCE4D6' # ส้มแดง
+                b_text_color = '#C65911'
 
         # จัดเรียงลำดับเวลาในคอลัมน์ C จากน้อยไปมาก
         def quick_parse(t):
@@ -180,7 +183,7 @@ try:
         for i, elem in enumerate(unique_sorted_nums):
             color_map[elem] = colors[i % len(colors)]
             
-        # ฟังก์ชันระบายสีเงื่อนไขล็อกสีคอลัมน์ B ยกแผงตามต้นฉบับ
+        # ฟังก์ชันระบายสีตามเงื่อนไข Fix สีคอลัมน์ B
         def style_entire_table(row):
             styles = [''] * len(row)
             row_idx = row.name
@@ -188,7 +191,7 @@ try:
             # คอลัมน์ A (ดัชนี 0): ตัวอักษรปกติ
             styles[0] = 'text-align: center; color: #000000;'
             
-            # 🚨 จุดแก้ไขวิกฤต: ล็อกสีคอลัมน์ B (ดัชนี 1) ยกแผงให้ได้โทนพาสเทล เขียว/ส้มแดง ตรงตามหน้าชีทต้นฉบับเป๊ะ ๆ ไม่เพี้ยนแล้ว
+            # 🚨 คอลัมน์ B (ดัชนี 1): พ่นสีที่ Fix ไว้ตามชื่อหน้าชีทถาวร 100%
             styles[1] = f'background-color: {b_bg_color}; color: {b_text_color}; font-weight: bold; text-align: center;'
                 
             # คอลัมน์ C (ดัชนี 2): สีฟ้าอ่อนเมื่อเวลากระโดด
@@ -229,7 +232,7 @@ try:
             column_config=col_configurations
         )
         
-        st.success(f"✨ แก้ไขสีคอลัมน์ B เรียบร้อย! ตอนนี้ระบบล็อกสีส้มแดง/เขียวพาสเทลยกแผงตรงตาม Google Sheet แล้วครับ!")
+        st.success(f"✨ ล็อกสี Col_B สำเร็จ! Data1 = สีเขียวถาวร | Data2 = สีส้มแดงถาวร แม่นยำ 100% ครับ!")
 
 except Exception as err:
     st.error(f"❌ เกิดข้อผิดพลาดในการประมวลผลตาราง: {err}")
